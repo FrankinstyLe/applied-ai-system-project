@@ -1,224 +1,197 @@
-# 🎵 Music Recommender Simulation
+# 🎵 Music Recommender — Reliable, Explainable Recommendations
 
-## Project Summary
+## Summary
 
-In this project you will build and explain a small music recommender system.
+This project turns a small classroom prototype into an interactive, **trustworthy-by-design** music recommender. It doesn't just return songs — it explains *why* each song was picked, and it ships with a reliability harness that measures **how consistently and how well** it performs across many kinds of users.
 
-Your goal is to:
+**Why it matters:** getting a recommender to *work* is one thing; making it *accurately beneficial to real users* is the actual goal. By building the evolution and the measurement together, I can see exactly what's missing and what needs to improve — instead of guessing. The headline of this version is reliability and consistency: same input → same list, small input change → small output change, and every recommendation carries a plain-English reason.
 
-- Represent songs and a user "taste profile" as data
-- Design a scoring rule that turns that data into recommendations
-- Evaluate what your system gets right and wrong
-- Reflect on how this mirrors real world AI recommenders
+### Where it started — *Music Recommender Simulation*
 
-Replace this paragraph with your own summary of what your version does.
+The original project, **Music Recommender Simulation**, was a command-line, content-based recommender. It represented songs and a user "taste profile" as data, applied a hand-written scoring rule (genre, mood, energy, acousticness) to rank a 20-song catalog, and printed the top-k matches with explanations. Its goals were to learn how raw data becomes a prediction, to evaluate what the system got right and wrong, and to reflect on how this mirrors real-world AI recommenders.
+
+This applied-AI version keeps that scoring core intact and extends it into a fuller system: an **interactive Streamlit front-end** so non-technical users can build a profile and get results (with inline audio and listen links), **graded fuzzy matching** so related tastes earn partial credit, and a **reliability evaluator** that puts hard numbers behind the system's strengths and biases.
 
 ---
 
 ## How The System Works
 
-My recommender is a **content-based** system: it recommends songs that *sound and feel like* what the user says they want. It works in two clear steps — **score every song**, then **rank and trim** the list.
+The recommender is **content-based**: it recommends songs that *sound and feel like* what the user asks for, in two clear steps — **score every song**, then **rank and trim** the list.
 
-### What features does each `Song` use?
+**Each `Song`** carries ten fields, but four drive the recommendation: `genre`, `mood`, `energy` (0–1), and `acousticness` (0–1). The rest (`id`, `title`, `artist`, `tempo_bpm`, `valence`, `danceability`) are labels for display or features kept for future experiments.
 
-Each `Song` stores ten fields, but only four actually drive the recommendation:
+**A user's taste profile** is: `favorite_genre`, `favorite_mood`, `target_energy` (0–1), and `likes_acoustic` (True/False). The Streamlit UI lets a user pick *multiple* genres and moods; the scorer keeps the best-matching pairing per song.
 
-- **`genre`** (e.g. pop, lofi, rock) — the style of the song.
-- **`mood`** (e.g. happy, chill, intense) — the feeling it gives off.
-- **`energy`** (0–1) — how intense or laid-back it is.
-- **`acousticness`** (0–1) — how acoustic vs. electronic it sounds.
+**Scoring rule** (`_score_song_attrs`), with weights rebalanced so the discriminating signals do more work than the near-universal energy term:
 
-The song also carries `id`, `title`, and `artist` (labels for display, not scoring) and `tempo_bpm`, `valence`, and `danceability` (extra audio features I keep on hand for future experiments but don't score on yet).
-
-### What does the `UserProfile` store?
-
-A user's "taste profile" is four preferences:
-
-- **`favorite_genre`** — the genre they're in the mood for.
-- **`favorite_mood`** — the vibe they want.
-- **`target_energy`** (0–1) — how energetic they want the music.
-- **`likes_acoustic`** (True/False) — whether they prefer acoustic tracks.
-
-### How does the `Recommender` compute a score for each song?
-
-For one song, it adds up four rewards (all handled in `_score_song_attrs`):
-
-| What's checked | How it's scored | Points |
+| What's checked | How it's scored | Weight |
 |---|---|---|
-| Genre matches favorite | exact match | **+2.0** |
-| Mood matches favorite | exact match | **+1.5** |
-| Energy close to target | `1 − abs(target − energy)`, then ×2.0 | **up to +2.0** |
-| Acoustic preference | rewards acoustic if `likes_acoustic`, else non-acoustic | **up to +1.0** |
+| Genre match | graded (exact / substring / same family) | **×3.0** |
+| Mood match | graded (exact / substring / same family) | **×2.0** |
+| Energy closeness | `1 − abs(target − energy)` | **×1.5** |
+| Acoustic preference | rewards acoustic if `likes_acoustic`, else non-acoustic | **up to ±1.0** |
 
-The closer a song is to the profile, the higher its total. Along the way the scorer also collects plain-English **reasons** (e.g. *"matches your favorite genre (pop)"*) so the recommendation can explain itself.
+Graded **fuzzy matching** means `indie pop` earns partial credit toward `pop`, and `chill` ~ `relaxed`, instead of scoring zero. Along the way the scorer collects plain-English **reasons** so every recommendation can explain itself.
 
-### How do I choose which songs to recommend?
-
-1. **Score** every song in the catalog with the rule above.
-2. **Sort** them from highest score to lowest.
-3. **Keep the top `k`** (default 5) and hand them back with their explanations.
-
-So the final list is simply *"the k songs that best match this profile, best first."*
-
-```
-UserProfile ─┐
-             ├─►  score each Song  ─►  sort high→low  ─►  keep top k  ─►  recommendations
-  all Songs ─┘        (Scoring Rule)      (Ranking Rule)
-```
+**Choosing recommendations:** score every song → sort high→low → keep the top `k` (default 5) with their explanations.
 
 ---
 
-## Getting Started
+## Architecture Overview
 
-### Setup
+The full system is captured in [`diagrams/system_diagram.mmd`](diagrams/system_diagram.mmd) (Mermaid). It reads left-to-right as **input → process → output**, with two feedback loops layered on top:
 
-1. Create a virtual environment (optional but recommended):
+- **Input** — the song catalog (`data/songs.csv`, plus optional media columns) and the user's taste profile. Profiles arrive two ways: hard-coded in the CLI (`src/main.py`) or interactively from the **Streamlit UI** (`src/app.py`).
+- **Process** — `load_songs()` parses the catalog; the **scoring rule** (`recommender.py`) turns each song + profile into a score and reasons; `recommend_multi()` (used by the UI) scores each song against every selected genre×mood pairing and keeps the best; the **ranking rule** sorts and trims to top-k.
+- **Output** — the CLI prints a ranked text list; the web app renders result cards with an inline audio player and YouTube/Spotify links.
+- **Evaluation loop** — the `ReliabilityEvaluator` (`src/reliability.py`) *observes* the recommender without changing it, producing a `ReliabilityReport`.
+- **Human & testing loop** — automated tests plus my own review of the report and biases feed back into the scoring weights and data.
+
+The key architectural idea: **both front-ends share one scoring core**, and the reliability harness measures that core rather than either UI — so the evaluation stays honest no matter how a user interacts with the system.
+
+---
+
+## Setup Instructions
+
+1. **(Optional) create a virtual environment**
 
    ```bash
    python -m venv .venv
-   source .venv/bin/activate      # Mac or Linux
+   source .venv/bin/activate      # macOS / Linux
    .venv\Scripts\activate         # Windows
+   ```
 
-2. Install dependencies
+2. **Install dependencies**
 
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-3. Run the app:
+3. **Run the interactive web app** (recommended)
 
-```bash
-python -m src.main
-```
+   ```bash
+   streamlit run src/app.py
+   ```
 
-### Running Tests
+   Then pick genres/moods, tune energy, and click **Recommend** (or **🎲 Surprise me**).
 
-Run the starter tests with:
+4. **Or run the command-line version**
 
-```bash
-pytest
-```
+   ```bash
+   python -m src.main
+   ```
 
-You can add more tests in `tests/test_recommender.py`.
+5. **Run the reliability report**
+
+   ```bash
+   python -m src.run_reliability
+   ```
+
+6. **Run the tests**
+
+   ```bash
+   pytest
+   ```
+
+> To play tracks inline in the web app, see [`data/audio/HOW_TO_ADD_AUDIO.md`](data/audio/HOW_TO_ADD_AUDIO.md).
 
 ---
 
-## Sample Recommendation Output
-### Profile 1: genre=pop, mood=happy, energy=0.8
+## Sample Interactions
+
+### A) Web app (Streamlit) — multi-select profile
+
+**Input:** genres = `[pop]`, moods = `[chill]`, energy = `0.40`, acoustic = `yes`, k = `5`
+
+**Output:**
+
+```text
+1. Library Rain - Paper Lanterns   | lofi, chill    | energy 0.35 | score 4.29
+   Because: matches your mood (chill), energy level is a great fit, nice and acoustic, like you prefer
+2. Spacewalk Thoughts - Orbit Bloom | ambient, chill | energy 0.28 | score 4.24
+   Because: matches your mood (chill), energy level is a great fit, nice and acoustic, like you prefer
+3. Midnight Coding - LoRoom        | lofi, chill    | energy 0.42 | score 4.18
+   Because: matches your mood (chill), energy level is a great fit, nice and acoustic, like you prefer
+4. Sunrise City - Neon Echo        | pop, happy     | energy 0.82 | score 4.05
+   Because: matches your favorite genre (pop), energy level is a decent fit
+5. Gym Hero - Max Pulse            | pop, intense   | energy 0.93 | score 3.75
+   Because: matches your favorite genre (pop)
 ```
-============================================================
-  TOP RECOMMENDATIONS
-  For: genre=pop, mood=happy, energy=0.8
-============================================================
 
-  1.  Sunrise City - Neon Echo
-      Score: 6.28  |  pop, happy
-      Because: matches your favorite genre (pop), matches your mood (happy), energy level is a great fit, energetic, non-acoustic sound
+Note how the **acoustic + low-energy + chill** signals pull acoustic lofi/ambient tracks to the top, while the `pop` genre preference still surfaces two pop songs lower down — the explanation makes the trade-off visible.
 
-  2.  Gym Hero - Max Pulse
-      Score: 4.69  |  pop, intense
-      Because: matches your favorite genre (pop), energy level is a great fit, energetic, non-acoustic sound
+<!-- Optional: add a screenshot of the running Streamlit app here -->
 
-  3.  Rooftop Lights - Indigo Parade
-      Score: 4.07  |  indie pop, happy
-      Because: matches your mood (happy), energy level is a great fit
+### B) Command line — mainstream taste
 
-  4.  Concrete Kingdom - Blocktext
-      Score: 2.88  |  hip hop, confident
-      Because: energy level is a great fit, energetic, non-acoustic sound
+**Input:** genre = `pop`, mood = `happy`, energy = `0.8`, likes_acoustic = `True`
 
-  5.  Late Shift Funk - The Groove Unit
-      Score: 2.76  |  funk, playful
-      Because: energy level is a great fit, energetic, non-acoustic sound
+**Output:**
 
-============================================================
+```text
+1. Sunrise City - Neon Echo      Score: 6.65 | pop, happy
+   Because: matches your favorite genre (pop), matches your mood (happy), energy level is a great fit
+2. Rooftop Lights - Indigo Parade Score: 5.59 | indie pop, happy
+   Because: related to your favorite genre (indie pop), matches your mood (happy), energy level is a great fit
+3. Gym Hero - Max Pulse          Score: 4.35 | pop, intense
+   Because: matches your favorite genre (pop), energy level is a great fit
+4. Night Drive Loop - Neon Echo  Score: 3.15 | synthwave, moody
+   Because: related to your favorite genre (synthwave), energy level is a great fit
+5. Dusty Highway - Cody Rivers   Score: 2.78 | country, hopeful
+   Because: a similar mood (hopeful), energy level is a decent fit
 ```
-### Profile 2: genre=rock, mood=sad, energy=-1.0
+
+Fuzzy matching earns `indie pop` and `synthwave` partial genre credit — related discovery instead of an exact-match filter bubble.
+
+### C) Command line — adversarial input (negative energy)
+
+**Input:** genre = `rock`, mood = `sad`, energy = `-1.0`, likes_acoustic = `True`
+
+**Output:**
+
+```text
+1. Storm Runner - Voltline       Score: 1.73 | rock, intense
+   Because: matches your favorite genre (rock)
+2. Spacewalk Thoughts - Orbit Bloom Score: 0.50 | ambient, chill
+   Because: nice and acoustic, like you prefer
+3. Moonlit Sonata Drift - Aria Vance Score: 0.50 | classical, melancholy
+   Because: nice and acoustic, like you prefer
+4. Library Rain - Paper Lanterns Score: 0.33 | lofi, chill
+   Because: nice and acoustic, like you prefer
+5. Coffee Shop Stories - Slow Stereo Score: 0.33 | jazz, relaxed
+   Because: nice and acoustic, like you prefer
 ```
-============================================================
-  TOP RECOMMENDATIONS
-  For: genre=rock, mood=sad, energy=-1.0
-============================================================
 
-  1.  Storm Runner - Voltline
-      Score: 1.08  |  rock, intense
-      Because: matches your favorite genre (rock), energetic, non-acoustic sound
+An out-of-range `energy = -1.0` inverts the energy term, so low-energy acoustic tracks bubble up. The list still looks plausible — a deliberate demonstration of the "garbage in, garbage out" limitation documented below.
 
-  2.  Velvet Hours - Marlowe Rae
-      Score: -0.42  |  r&b, romantic
-      Because: a reasonable all-round match
+---
 
-  3.  Spacewalk Thoughts - Orbit Bloom
-      Score: -0.48  |  ambient, chill
-      Because: a reasonable all-round match
+## Design Decisions
 
-  4.  Midnight Coding - LoRoom
-      Score: -0.55  |  lofi, chill
-      Because: a reasonable all-round match
-
-  5.  Moonlit Sonata Drift - Aria Vance
-      Score: -0.55  |  classical, melancholy
-      Because: a reasonable all-round match
-
-============================================================
-```
-### Profile 3: genre=jazz, mood=sad, energy=1.0
-```
-============================================================
-  TOP RECOMMENDATIONS
-  For: genre=jazz, mood=sad, energy=1.0
-============================================================
-
-  1.  Iron Verdict - Ashfall
-      Score: 2.90  |  metal, aggressive
-      Because: energy level is a great fit, energetic, non-acoustic sound
-
-  2.  Voltage Bloom - Pulsewave
-      Score: 2.87  |  edm, energetic
-      Because: energy level is a great fit, energetic, non-acoustic sound
-
-  3.  Coffee Shop Stories - Slow Stereo
-      Score: 2.85  |  jazz, relaxed
-      Because: matches your favorite genre (jazz)
-
-  4.  Gym Hero - Max Pulse
-      Score: 2.81  |  pop, intense
-      Because: energy level is a great fit, energetic, non-acoustic sound
-
-  5.  Storm Runner - Voltline
-      Score: 2.72  |  rock, intense
-      Because: energy level is a great fit, energetic, non-acoustic sound
-
-============================================================
-```
-**Screenshot or video** *(optional)*: <!-- Insert a screenshot or demo video link here -->
+- **Keep one scoring core, add front-ends around it.** The Streamlit app and CLI both call the same `score_song` / `_score_song_attrs`. Trade-off: the UI can't invent new scoring behavior, but every interface (and the reliability harness) stays consistent and testable.
+- **Graded fuzzy matching instead of exact string equality.** Related labels earn partial credit (`indie pop` ~ `pop`, `chill` ~ `relaxed`). This adds a little discovery/exploration and lifted **stability from 0.83 → 0.93**. Trade-off: fuzzy families are hand-authored, so they encode my judgment about what's "similar."
+- **Rebalanced weights (genre 3.0 / mood 2.0 / energy 1.5).** The discriminating signals now outweigh the near-universal energy term, pushing true matches into the top-k and separating the #1 pick from the pack. Trade-off: strong genre weighting can crowd out cross-genre serendipity.
+- **Multi-select in the UI, single-signal scorer underneath.** `recommend_multi()` scores each song against every chosen (genre, mood) pair and keeps the best. Trade-off: "match *any* of my tastes" is simple and predictable, but it can't express "match *all* of them at once."
+- **Reliability as an observer, not a gatekeeper.** `reliability.py` measures the recommender without altering what it recommends, so the report is an honest health check rather than a filter that hides weak spots.
+- **Explanations are first-class.** Every recommendation ships a reason string. Trade-off: a little extra bookkeeping in the scorer, in exchange for transparency users can actually read.
 
 ---
 
 ## Reliability System
 
-To measure *how well* and *how consistently* the recommender performs, I added a
-reliability check (`src/reliability.py`) that observes the recommender without
-changing what it recommends. Run it against the real catalog with:
-
-```bash
-python -m src.run_reliability
-```
-
-It scores five dimensions, each normalised to `[0.0, 1.0]` (1.0 is best) and
-averaged into one **overall** number:
+To measure *how well* and *how consistently* the recommender performs, `src/reliability.py` observes it without changing its output. Run it with `python -m src.run_reliability`. Each dimension is normalised to `[0.0, 1.0]` (1.0 is best) and averaged into an **overall** score:
 
 | Metric | Question it answers | How it's measured |
 |---|---|---|
 | **Determinism** | Same profile → same list, every time? | Run a profile 5× and check the ranking is byte-for-byte identical. |
-| **Stability** | Does a tiny input change cause only a tiny output change? | Nudge `target_energy` by ±0.05 and measure the Jaccard overlap of the top-k. |
-| **Relevance** | Is the top-k actually on-taste? | Fraction of the top-k whose genre **or** mood matches the profile (precision@k). |
-| **Confidence** | Is the #1 pick decisive, not a near-tie? | Normalised score margin between rank 1 and the last song that made the cut. |
+| **Stability** | Tiny input change → only a tiny output change? | Nudge `target_energy` by ±0.05 and measure the Jaccard overlap of the top-k. |
+| **Relevance** | Is the top-k actually on-taste? | Fraction of the top-k whose genre **or** mood matches (precision@k). |
+| **Confidence** | Is the #1 pick decisive, not a near-tie? | Normalised score margin between rank 1 and the cut-off. |
 | **Coverage** | Can the system reach the whole catalog? | Distinct songs recommended across a suite of profiles ÷ catalog size. |
 
 Sample run over five diverse profiles:
 
-```
+```text
   Determinism  ####################  1.00
   Stability    ###################.  0.93
   Relevance    #########...........  0.44
@@ -228,113 +201,44 @@ Sample run over five diverse profiles:
   OVERALL      ##############......  0.69
 ```
 
-The numbers put hard evidence behind the biases in *Limitations and Risks*
-below, and they also reveal which problems code can and can't fix:
-
-- **Relevance** is high for mainstream tastes (pop 0.60, lofi 0.80) but collapses
-  for niche genres (jazz and metal 0.20). This is a **data ceiling, not a ranking
-  bug**: the catalog holds exactly one jazz and one metal song, so precision@5
-  caps at 1/5 no matter how songs are scored. The honest fix is a larger, more
-  balanced catalog.
-- **Confidence** sits around 0.40 because most profiles have *several* equally-good
-  matches (e.g. two pop songs plus indie pop), so the top-k scores are naturally
-  close. That reflects a catalog with multiple right answers, not a fragile ranking.
-
-To push more true matches into the top-k I rebalanced the weights
-(genre 3.0 / mood 2.0 / energy 1.5) and added **graded fuzzy matching** so related
-labels earn partial credit (`indie pop` ~ `pop`, `chill` ~ `relaxed`). That lifted
-**stability from 0.83 to 0.93** and made the #1 pick win by a clear margin instead
-of a near-tie, even though the relevance/confidence ceilings above are structural.
-Tests for every metric live in `tests/test_reliability.py`.
-
 ---
 
-## Experiments You Tried
+## Testing Summary
 
-I experimented with the following changes to the scoring rule:
-- Weighted the genre by 3/4 instead of 2.0, to see if it would diversify recommendations more.
-- Added a new feature for acousticness, giving a bonus if the user likes acoustic tracks and the song is acoustic.
-- Temporarily disabled the mood match bonus to see how it affected recommendations.
+**What worked, what didn't, and what I learned:** some metrics improved and some stayed flat — and the flat ones were mostly capped by the **limited data size**, not by the ranking logic.
 
-The results of these experiments were:
-- The ranking slightly changed for all 3 profiles, with more diverse genres appearing in the third recommendation and below.
-- The accousticness almost doesn't affect the top recommendations, but it does change the lower-ranked songs, especially for users who prefer acoustic tracks. It does heavily affect if the user profile negative energy level. 
-- In general, the top 2 recommendations for each profile remained the same, but the lower-ranked songs changed more significantly.
+| Metric | Before | After | Why |
+|---|---:|---:|---|
+| **Stability** | 0.83 | **0.93** | Fuzzy matching stops small energy nudges from swapping songs. |
+| **Overall** | 0.67 | **0.69** | Net lift, driven mostly by stability. |
+| **Relevance** | 0.44 | 0.44 | **Data ceiling** — 1 jazz / 1 metal song caps precision@5 at 0.20. |
+| **Confidence** | 0.40 | 0.40 | **Inherent** — several equally-good matches, not fragility. |
+
+The lesson: not every weakness is a code bug. Stability responded to a code change (fuzzy matching), but relevance and confidence are structural — they reflect a tiny, imbalanced catalog with multiple equally-valid answers. Measuring first told me *which* problems code could fix and which ones only more/better data could. Tests for every metric live in `tests/test_reliability.py`.
 
 ---
 
 ## Limitations and Risks
 
-Beyond the obvious limits (tiny 20-song catalog, no understanding of lyrics or
-language), I stress-tested the scoring rule with adversarial and edge-case
-profiles and found several **structural biases** — filter bubbles that affect
-users even when they enter perfectly valid preferences. I measured these against
-the actual catalog, so they aren't hypothetical.
+Beyond the obvious limits (tiny 20-song catalog, no understanding of lyrics), I stress-tested the scorer with adversarial and edge-case profiles and found several **structural biases** — measured against the real catalog, so they aren't hypothetical.
 
-**1. The "energy gap" underserves moderate-energy users.**
-The catalog's energy is bimodal — 7 songs below 0.5, 9 songs at 0.7 or above,
-and only 4 in the middle (with a real empty gap between 0.64 and 0.75). Because
-the energy term is a symmetric linear penalty (`1 − abs(target − energy)`), a
-user who wants energy ≈ 0.6 has almost nothing close, so the fixed genre/mood
-bonuses drag them toward whichever extreme cluster is nearer. High- and
-low-energy tastes are served well; the middle is a blind spot the data can't see.
+1. **The "energy gap" underserves moderate-energy users.** Energy is bimodal (a real empty gap between 0.64 and 0.75), so a user wanting energy ≈ 0.6 gets dragged toward whichever extreme cluster is nearer.
+2. **Energy and acousticness are secretly the same axis.** `corr(energy, acousticness) = −0.97` — the two "independent" terms are really one signal counted twice (double jeopardy for calm-music fans).
+3. **There is no "neutral" on acoustic.** `likes_acoustic` always contributes up to ±1.0 and defaults to `False`, silently biasing undecided users toward electronic/produced tracks.
+4. **Fuzzy matching softens but doesn't eliminate the filter bubble.** Related labels now earn partial credit, but the system still leans heavily on the labels the user typed.
+5. **Catalog imbalance penalizes niche-genre fans.** With `lofi=3, pop=2` and everything else appearing once, niche fans get one true match and a top-5 padded with energy-only strangers.
+6. **Three measured features are ignored.** `tempo_bpm`, `valence`, and `danceability` are loaded but never scored — `valence` especially, which directly measures positivity.
+7. **Rankings never change.** Ties keep CSV order and there's no randomization, so a profile returns the identical list every run — no freshness.
+8. **Invalid input isn't validated.** Out-of-range or negative `energy` silently hijacks or inverts the ranking (see Sample Interaction C); case mismatches (`"Pop"` vs `"pop"`) drop the exact-genre bonus with no warning.
 
-**2. Energy and acousticness are secretly the same axis (double jeopardy).**
-In this catalog `corr(energy, acousticness) = −0.97` — nearly perfect. The two
-"independent" scoring terms are really one signal counted twice. A user who wants
-calm, low-energy music gets low-energy songs (which are acoustic), which are then
-penalized *again* by the default non-acoustic reward. One preference, two strikes.
-
-**3. There is no "neutral" on acoustic.**
-`likes_acoustic` is a boolean that *always* contributes up to ±1.0, and it
-defaults to `False`. So every user — including those who never expressed an
-opinion — is silently biased toward electronic/produced tracks (edm, metal, pop)
-and away from jazz, classical, folk, ambient, and lofi. There is no "don't care."
-
-**4. Exact-match genre/mood kills discovery.**
-Genre and mood are compared with strict string equality and no notion of
-similarity. "pop" and "indie pop" are treated as unrelated; so are "chill",
-"relaxed", and "focused". The system is pure exploitation with zero exploration —
-it can only ever reinforce the one label the user typed, which is the textbook
-definition of a filter bubble.
-
-**5. Catalog imbalance penalizes niche-genre fans.**
-Genre counts are `lofi=3, pop=2`, and everything else appears once. A lofi or pop
-fan gets a coherent, on-taste list; a metal, classical, or reggae fan gets
-*exactly one* genre match and the rest of their top-5 is filled by strangers
-matched only on energy. The same applies to the ~14 moods that appear only once.
-
-**6. Three measured features are ignored.**
-`tempo_bpm`, `valence`, and `danceability` are loaded but never scored. This
-matters most for `valence` (0–1 positivity): it directly measures how "happy" a
-track is, yet mood matching relies entirely on the text label rather than the
-number that actually captures the feeling.
-
-**7. Rankings never change.**
-Ties keep CSV order (lowest `id` wins) and there is no randomization, so a given
-profile returns the identical list on every run — no rotation, no freshness.
-
-**8. Invalid input is not validated (garbage in, garbage out).**
-Because energy closeness is never clamped, an out-of-range `energy` (e.g. `100`)
-sends every score massively negative and silently hijacks the ranking; a
-*negative* energy inverts the intent entirely (it starts rewarding low-energy
-songs) while still producing plausible-looking scores. Case also matters —
-`"Pop"` never matches `"pop"`, so the genre bonus vanishes with no warning.
-
-I go deeper on the fairness implications of these in the model card.
+I go deeper on the fairness implications in the [model card](model_card.md).
 
 ---
 
 ## Reflection
 
-Read and complete `model_card.md`:
+Building this taught me that a recommender is only as good as its fit to *real* people, and that's the hard part: **it's hard to make one that's one-size-fits-all.** I can optimize the scoring, tune the weights, and add fuzzy matching to squeeze out more relevance and stability — but only up to a point. The scoring rule encodes *my* assumptions about what "similar" and "good" mean, and the data caps what any rule can achieve.
 
-[**Model Card**](model_card.md)
+What I take away is that the last mile can't be reached by code alone. Turning data into predictions is straightforward; turning predictions into something genuinely helpful and fair needs **real user experience and feedback** to guide the next round of weight and scoring adjustments. That's also where bias hides — in the default assumptions (like `likes_acoustic=False`), the imbalanced catalog, and the labels I decided were "related." Measuring reliability didn't remove those biases, but it made them visible and honest, which is the necessary first step toward improving them.
 
-Write 1 to 2 paragraphs here about what you learned:
-
-- about how recommenders turn data into predictions
-- about where bias or unfairness could show up in systems like this
-
-
-
+See the [**Model Card**](model_card.md) for the full fairness analysis.
