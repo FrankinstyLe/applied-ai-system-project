@@ -1,0 +1,62 @@
+%% Music Recommender Simulation - System Diagram
+%% Data flow: input (catalog + user taste) -> process (score/rank) -> output (top-k)
+%% Plus the reliability/evaluation loop and where humans/tests check the AI results.
+
+flowchart TB
+    subgraph INPUT["Input"]
+        CSV[("data/songs.csv<br/>song catalog")]
+        USER["UserProfile<br/>favorite_genre, favorite_mood,<br/>target_energy, likes_acoustic"]
+    end
+
+    subgraph PROCESS["Process — Recommender (src/recommender.py)"]
+        LOAD["load_songs()<br/>CSV rows -> Song objects"]
+        SCORE["Scoring Rule<br/>_score_song_attrs()<br/>genre + mood + energy + acoustic<br/>-> score + reasons"]
+        RANK["Ranking Rule<br/>sort high -> low, keep top k"]
+    end
+
+    subgraph OUTPUT["Output"]
+        RECS["Top-k Recommendations<br/>song, score, explanation"]
+        CLI["CLI display<br/>src/main.py"]
+    end
+
+    subgraph EVAL["Evaluation & Reliability (src/reliability.py)"]
+        EVALR["ReliabilityEvaluator<br/>determinism, stability,<br/>relevance, confidence, coverage"]
+        REPORT["ReliabilityReport<br/>overall score + bars<br/>src/run_reliability.py"]
+    end
+
+    subgraph HUMAN["Human & Testing Checks"]
+        TESTS["Automated tests<br/>tests/test_recommender.py<br/>tests/test_reliability.py"]
+        REVIEW["Human review<br/>reads report, inspects biases,<br/>model_card.md / README"]
+    end
+
+    %% Data flow: input -> process -> output
+    CSV --> LOAD
+    LOAD --> SCORE
+    USER --> SCORE
+    SCORE --> RANK
+    RANK --> RECS
+    RECS --> CLI
+
+    %% Evaluation observes the recommender without changing it
+    USER -. test profiles .-> EVALR
+    RANK -. observed by .-> EVALR
+    EVALR --> REPORT
+
+    %% Where humans and testing check the AI results
+    RECS --> TESTS
+    REPORT --> REVIEW
+    EVALR --> TESTS
+    REVIEW -. tune weights / fix data .-> SCORE
+    TESTS -. catch regressions .-> SCORE
+
+    classDef input fill:#e3f2fd,stroke:#1565c0,color:#0d47a1;
+    classDef process fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20;
+    classDef output fill:#fff3e0,stroke:#ef6c00,color:#e65100;
+    classDef eval fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c;
+    classDef human fill:#fce4ec,stroke:#c2185b,color:#880e4f;
+
+    class CSV,USER input;
+    class LOAD,SCORE,RANK process;
+    class RECS,CLI output;
+    class EVALR,REPORT eval;
+    class TESTS,REVIEW human;

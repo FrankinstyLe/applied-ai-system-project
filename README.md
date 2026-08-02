@@ -195,6 +195,60 @@ You can add more tests in `tests/test_recommender.py`.
 
 ---
 
+## Reliability System
+
+To measure *how well* and *how consistently* the recommender performs, I added a
+reliability check (`src/reliability.py`) that observes the recommender without
+changing what it recommends. Run it against the real catalog with:
+
+```bash
+python -m src.run_reliability
+```
+
+It scores five dimensions, each normalised to `[0.0, 1.0]` (1.0 is best) and
+averaged into one **overall** number:
+
+| Metric | Question it answers | How it's measured |
+|---|---|---|
+| **Determinism** | Same profile → same list, every time? | Run a profile 5× and check the ranking is byte-for-byte identical. |
+| **Stability** | Does a tiny input change cause only a tiny output change? | Nudge `target_energy` by ±0.05 and measure the Jaccard overlap of the top-k. |
+| **Relevance** | Is the top-k actually on-taste? | Fraction of the top-k whose genre **or** mood matches the profile (precision@k). |
+| **Confidence** | Is the #1 pick decisive, not a near-tie? | Normalised score margin between rank 1 and the last song that made the cut. |
+| **Coverage** | Can the system reach the whole catalog? | Distinct songs recommended across a suite of profiles ÷ catalog size. |
+
+Sample run over five diverse profiles:
+
+```
+  Determinism  ####################  1.00
+  Stability    ###################.  0.93
+  Relevance    #########...........  0.44
+  Confidence   ########............  0.40
+  Coverage     ##############......  0.70
+  --------------------------------------------------------
+  OVERALL      ##############......  0.69
+```
+
+The numbers put hard evidence behind the biases in *Limitations and Risks*
+below, and they also reveal which problems code can and can't fix:
+
+- **Relevance** is high for mainstream tastes (pop 0.60, lofi 0.80) but collapses
+  for niche genres (jazz and metal 0.20). This is a **data ceiling, not a ranking
+  bug**: the catalog holds exactly one jazz and one metal song, so precision@5
+  caps at 1/5 no matter how songs are scored. The honest fix is a larger, more
+  balanced catalog.
+- **Confidence** sits around 0.40 because most profiles have *several* equally-good
+  matches (e.g. two pop songs plus indie pop), so the top-k scores are naturally
+  close. That reflects a catalog with multiple right answers, not a fragile ranking.
+
+To push more true matches into the top-k I rebalanced the weights
+(genre 3.0 / mood 2.0 / energy 1.5) and added **graded fuzzy matching** so related
+labels earn partial credit (`indie pop` ~ `pop`, `chill` ~ `relaxed`). That lifted
+**stability from 0.83 to 0.93** and made the #1 pick win by a clear margin instead
+of a near-tie, even though the relevance/confidence ceilings above are structural.
+Tests for every metric live in `tests/test_reliability.py`.
+
+---
+
 ## Experiments You Tried
 
 I experimented with the following changes to the scoring rule:

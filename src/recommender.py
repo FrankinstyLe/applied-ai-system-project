@@ -8,10 +8,55 @@ from dataclasses import dataclass
 # songs whose energy is close to what the user wants, and factor in whether
 # the user likes acoustic tracks.
 # ---------------------------------------------------------------------------
-GENRE_MATCH_BONUS = 2.0
-MOOD_MATCH_BONUS = 1.5
-ENERGY_WEIGHT = 2.0
+# Weights rebalanced so the *discriminating* signals (genre, mood) do more of
+# the work than the near-universal energy term. This surfaces true matches into
+# the top-k (relevance) and spreads the #1 pick away from the pack (confidence).
+GENRE_MATCH_BONUS = 3.0
+MOOD_MATCH_BONUS = 2.0
+ENERGY_WEIGHT = 1.5
 ACOUSTIC_WEIGHT = 1.0
+
+# Partial-credit factors for fuzzy matching (see _similarity).
+SUBSTRING_CREDIT = 0.6   # e.g. "pop" within "indie pop"
+SYNONYM_CREDIT = 0.5     # e.g. "chill" and "relaxed" in the same family
+
+# Loose families so related labels earn partial credit instead of nothing.
+# Strict string equality treated "pop"/"indie pop" and "chill"/"relaxed" as
+# unrelated, which starved niche-genre users of any second match.
+_GENRE_FAMILIES = [
+    {"pop", "indie pop", "synthwave"},
+    {"lofi", "ambient", "chill"},
+    {"edm", "hip hop", "funk"},
+    {"rock", "metal"},
+    {"jazz", "r&b", "funk"},
+    {"folk", "country", "world"},
+]
+_MOOD_FAMILIES = [
+    {"chill", "relaxed", "focused", "melancholy"},
+    {"happy", "uplifting", "playful", "energetic", "hopeful"},
+    {"intense", "aggressive", "confident", "moody"},
+]
+
+
+def _similarity(value: str, target: str, families: List[set]) -> float:
+    """
+    Graded match in [0.0, 1.0]:
+      1.0  exact match
+      0.6  one label contains the other ("pop" ~ "indie pop")
+      0.5  both labels share a family ("chill" ~ "relaxed")
+      0.0  unrelated
+    Returns the strongest applicable credit.
+    """
+    if not value or not target:
+        return 0.0
+    if value == target:
+        return 1.0
+    if value in target or target in value:
+        return SUBSTRING_CREDIT
+    for family in families:
+        if value in family and target in family:
+            return SYNONYM_CREDIT
+    return 0.0
 
 
 @dataclass
@@ -61,15 +106,23 @@ def _score_song_attrs(
     score = 0.0
     reasons: List[str] = []
 
-    # Genre match
-    if favorite_genre and genre == favorite_genre:
-        score += GENRE_MATCH_BONUS
-        reasons.append(f"matches your favorite genre ({genre})")
+    # Genre match (graded: exact, partial, or related family)
+    genre_sim = _similarity(genre, favorite_genre, _GENRE_FAMILIES)
+    if genre_sim > 0:
+        score += GENRE_MATCH_BONUS * genre_sim
+        if genre_sim == 1.0:
+            reasons.append(f"matches your favorite genre ({genre})")
+        else:
+            reasons.append(f"related to your favorite genre ({genre})")
 
-    # Mood match
-    if favorite_mood and mood == favorite_mood:
-        score += MOOD_MATCH_BONUS
-        reasons.append(f"matches your mood ({mood})")
+    # Mood match (graded the same way)
+    mood_sim = _similarity(mood, favorite_mood, _MOOD_FAMILIES)
+    if mood_sim > 0:
+        score += MOOD_MATCH_BONUS * mood_sim
+        if mood_sim == 1.0:
+            reasons.append(f"matches your mood ({mood})")
+        else:
+            reasons.append(f"a similar mood ({mood})")
 
     # Energy closeness: closer to target -> higher score (max ENERGY_WEIGHT)
     if target_energy is not None:
