@@ -216,6 +216,28 @@ Sample run over five diverse profiles:
 
 The lesson: not every weakness is a code bug. Stability responded to a code change (fuzzy matching), but relevance and confidence are structural — they reflect a tiny, imbalanced catalog with multiple equally-valid answers. Measuring first told me *which* problems code could fix and which ones only more/better data could. Tests for every metric live in `tests/test_reliability.py`.
 
+### How the recommendations are verified
+
+I test the system four complementary ways:
+
+| Method | Status | Where |
+|---|---|---|
+| **Automated tests** | ✅ 17 tests | `tests/test_recommender.py`, `test_reliability.py`, `test_robustness.py` |
+| **Confidence scoring** | ✅ per-recommendation | `confidence_from_score()` — each pick reports a 0–100% confidence (score ÷ best-possible score), shown in the CLI and Streamlit UI |
+| **Logging & error handling** | ✅ | `logging` throughout `load_songs` (missing file → clear error; malformed rows logged & skipped), input validation via `validate_user_prefs()`, and out-of-range energy is clamped instead of hijacking the ranking |
+| **Human evaluation** | 🟡 supported | plain-English `explain_recommendation` reasons + sample outputs above let a person sanity-check every pick; no formal rubric yet |
+
+Example CLI output with confidence:
+
+```
+  1.  Sunrise City - Neon Echo
+      Score: 6.65  |  Confidence: 89%  |  pop, happy
+      Because: matches your favorite genre (pop), matches your mood (happy), energy level is a great fit
+  2.  Rooftop Lights - Indigo Parade
+      Score: 5.59  |  Confidence: 75%  |  indie pop, happy
+      Because: related to your favorite genre (indie pop), matches your mood (happy), energy level is a great fit
+```
+
 ---
 
 ## Limitations and Risks

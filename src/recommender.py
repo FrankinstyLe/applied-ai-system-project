@@ -1,6 +1,13 @@
 import csv
+import logging
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
+
+# Library code gets a named logger; the *application* entry points
+# (main.py, run_reliability.py) decide how logs are shown. A NullHandler
+# keeps things quiet if a caller never configures logging.
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 # ---------------------------------------------------------------------------
 # Scoring weights (shared by both the OOP and functional implementations).
@@ -38,6 +45,23 @@ _MOOD_FAMILIES = [
 ]
 
 
+# The most any song can score: a perfect genre + mood + energy match plus the
+# full acoustic reward. Used to turn a raw score into a 0-1 confidence.
+MAX_SCORE = GENRE_MATCH_BONUS + MOOD_MATCH_BONUS + ENERGY_WEIGHT + ACOUSTIC_WEIGHT
+
+
+def _clamp01(value: float) -> float:
+    """Force a value into [0.0, 1.0]. Guards against out-of-range input
+    (e.g. energy=100 or -1) silently hijacking the ranking."""
+    return max(0.0, min(1.0, value))
+
+
+def _norm(label: str) -> str:
+    """Normalise a genre/mood label for matching: lowercase + trimmed, so
+    'Pop ' and 'pop' are treated as the same thing."""
+    return label.strip().lower() if isinstance(label, str) else ""
+
+
 def _similarity(value: str, target: str, families: List[set]) -> float:
     """
     Graded match in [0.0, 1.0]:
@@ -45,8 +69,9 @@ def _similarity(value: str, target: str, families: List[set]) -> float:
       0.6  one label contains the other ("pop" ~ "indie pop")
       0.5  both labels share a family ("chill" ~ "relaxed")
       0.0  unrelated
-    Returns the strongest applicable credit.
+    Matching is case-insensitive. Returns the strongest applicable credit.
     """
+    value, target = _norm(value), _norm(target)
     if not value or not target:
         return 0.0
     if value == target:
@@ -57,6 +82,38 @@ def _similarity(value: str, target: str, families: List[set]) -> float:
         if value in family and target in family:
             return SYNONYM_CREDIT
     return 0.0
+
+
+def confidence_from_score(score: float) -> float:
+    """
+    Turn a raw song score into a 0.0-1.0 confidence ("how sure the system is
+    about this pick"). It's the score as a fraction of the best score any song
+    could earn (MAX_SCORE), clamped so it never leaves [0, 1].
+    """
+    return _clamp01(score / MAX_SCORE) if MAX_SCORE else 0.0
+
+
+def validate_user_prefs(
+    favorite_genre: str,
+    favorite_mood: str,
+    target_energy: Optional[float],
+) -> List[str]:
+    """
+    Check a user's inputs and return a list of human-readable warnings
+    (empty == all good). This does NOT mutate anything — scoring clamps
+    out-of-range energy on its own — it just surfaces *why* results might
+    look off so callers can log or display it.
+    """
+    warnings: List[str] = []
+    if not favorite_genre:
+        warnings.append("no favorite genre given; genre match will be skipped")
+    if not favorite_mood:
+        warnings.append("no favorite mood given; mood match will be skipped")
+    if target_energy is not None and not (0.0 <= target_energy <= 1.0):
+        warnings.append(
+            f"target_energy={target_energy} is outside 0.0-1.0 and was clamped"
+        )
+    return warnings
 
 
 @dataclass
@@ -124,9 +181,12 @@ def _score_song_attrs(
         else:
             reasons.append(f"a similar mood ({mood})")
 
-    # Energy closeness: closer to target -> higher score (max ENERGY_WEIGHT)
+    # Energy closeness: closer to target -> higher score (max ENERGY_WEIGHT).
+    # Both values are clamped to [0, 1] first so out-of-range input (e.g.
+    # energy=100 or a negative target) can't drive the score wildly negative
+    # and silently hijack the ranking.
     if target_energy is not None:
-        energy_closeness = 1.0 - abs(target_energy - energy)
+        energy_closeness = 1.0 - abs(_clamp01(target_energy) - _clamp01(energy))
         score += ENERGY_WEIGHT * energy_closeness
         if energy_closeness >= 0.8:
             reasons.append("energy level is a great fit")
@@ -188,23 +248,45 @@ def load_songs(csv_path: str) -> List[Dict]:
     Loads songs from a CSV file into a list of dicts with numeric fields
     converted to the correct types.
     Required by src/main.py
+
+    Robust to bad input: a missing file raises FileNotFoundError with a clear
+    message, and any individual row that is malformed (missing column, non-numeric
+    field) is logged and skipped rather than crashing the whole load.
     """
+    try:
+        f = open(csv_path, newline="", encoding="utf-8")
+    except FileNotFoundError:
+        logger.error("Song catalog not found at %s", csv_path)
+        raise
+
     songs: List[Dict] = []
-    with open(csv_path, newline="", encoding="utf-8") as f:
+    skipped = 0
+    with f:
         reader = csv.DictReader(f)
-        for row in reader:
-            songs.append({
-                "id": int(row["id"]),
-                "title": row["title"],
-                "artist": row["artist"],
-                "genre": row["genre"],
-                "mood": row["mood"],
-                "energy": float(row["energy"]),
-                "tempo_bpm": float(row["tempo_bpm"]),
-                "valence": float(row["valence"]),
-                "danceability": float(row["danceability"]),
-                "acousticness": float(row["acousticness"]),
-            })
+        for line_no, row in enumerate(reader, start=2):  # header is line 1
+            try:
+                songs.append({
+                    "id": int(row["id"]),
+                    "title": row["title"],
+                    "artist": row["artist"],
+                    "genre": row["genre"],
+                    "mood": row["mood"],
+                    "energy": float(row["energy"]),
+                    "tempo_bpm": float(row["tempo_bpm"]),
+                    "valence": float(row["valence"]),
+                    "danceability": float(row["danceability"]),
+                    "acousticness": float(row["acousticness"]),
+                })
+            except (KeyError, ValueError, TypeError) as exc:
+                skipped += 1
+                logger.warning("Skipping malformed row at line %d: %s", line_no, exc)
+
+    if not songs:
+        logger.error("No valid songs loaded from %s", csv_path)
+    elif skipped:
+        logger.warning("Loaded %d songs, skipped %d malformed row(s)", len(songs), skipped)
+    else:
+        logger.info("Loaded %d songs from %s", len(songs), csv_path)
     return songs
 
 

@@ -22,7 +22,12 @@ import streamlit as st
 # root or from inside src/.
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from recommender import load_songs, score_song
+from recommender import (
+    load_songs,
+    score_song,
+    confidence_from_score,
+    validate_user_prefs,
+)
 
 # Resolve data path relative to the repo root so the app works from any CWD.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -215,6 +220,15 @@ def main() -> None:
     energy = st.session_state.energy
     likes_acoustic = st.session_state.likes_acoustic
 
+    # Surface input problems (e.g. the negative-energy stress test) instead of
+    # silently returning skewed results.
+    for warning in validate_user_prefs(
+        genre_sel[0] if genre_sel else "",
+        mood_sel[0] if mood_sel else "",
+        energy,
+    ):
+        st.warning(warning)
+
     recommendations = recommend_multi(
         genre_sel, mood_sel, energy, likes_acoustic, songs, k
     )
@@ -228,11 +242,13 @@ def main() -> None:
     )
 
     for rank, (song, score, explanation) in enumerate(recommendations, start=1):
+        confidence = confidence_from_score(score)
         with st.container(border=True):
             st.markdown(f"**{rank}. {song['title']}** — {song['artist']}")
             st.caption(
                 f"{song['genre']} · {song['mood']} · "
-                f"energy {song['energy']:.2f} · score {score:.2f}"
+                f"energy {song['energy']:.2f} · score {score:.2f} · "
+                f"confidence {confidence:.0%}"
             )
             st.write(f"_Because: {explanation}_")
             render_player(song, media_map)
