@@ -4,19 +4,22 @@
 
 flowchart TB
     subgraph INPUT["Input"]
-        CSV[("data/songs.csv<br/>song catalog")]
-        USER["UserProfile<br/>favorite_genre, favorite_mood,<br/>target_energy, likes_acoustic"]
+        CSV[("data/songs.csv<br/>song catalog (+ optional media cols)")]
+        WEBUI["Streamlit UI (src/app.py)<br/>multi-select genres/moods, energy slider,<br/>acoustic checkbox, 🎲 Surprise me"]
+        USER["UserProfile / prefs dict<br/>favorite_genre, favorite_mood,<br/>target_energy, likes_acoustic"]
     end
 
     subgraph PROCESS["Process — Recommender (src/recommender.py)"]
         LOAD["load_songs()<br/>CSV rows -> Song objects"]
-        SCORE["Scoring Rule<br/>_score_song_attrs()<br/>genre + mood + energy + acoustic<br/>-> score + reasons"]
+        SCORE["Scoring Rule<br/>score_song() / _score_song_attrs()<br/>genre + mood + energy + acoustic<br/>-> score + reasons"]
+        MULTI["recommend_multi() (src/app.py)<br/>score each song vs every<br/>selected genre×mood, keep best"]
         RANK["Ranking Rule<br/>sort high -> low, keep top k"]
     end
 
     subgraph OUTPUT["Output"]
         RECS["Top-k Recommendations<br/>song, score, explanation"]
         CLI["CLI display<br/>src/main.py"]
+        WEBOUT["Web results<br/>cards + inline audio player<br/>+ YouTube/Spotify links"]
     end
 
     subgraph EVAL["Evaluation & Reliability (src/reliability.py)"]
@@ -33,9 +36,17 @@ flowchart TB
     CSV --> LOAD
     LOAD --> SCORE
     USER --> SCORE
+    WEBUI --> USER
     SCORE --> RANK
     RANK --> RECS
     RECS --> CLI
+
+    %% Streamlit path: UI selections drive multi-taste scoring, results back to the web
+    WEBUI --> MULTI
+    LOAD --> MULTI
+    MULTI --> SCORE
+    MULTI --> RECS
+    RECS --> WEBOUT
 
     %% Evaluation observes the recommender without changing it
     USER -. test profiles .-> EVALR
@@ -55,8 +66,8 @@ flowchart TB
     classDef eval fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c;
     classDef human fill:#fce4ec,stroke:#c2185b,color:#880e4f;
 
-    class CSV,USER input;
-    class LOAD,SCORE,RANK process;
-    class RECS,CLI output;
+    class CSV,USER,WEBUI input;
+    class LOAD,SCORE,MULTI,RANK process;
+    class RECS,CLI,WEBOUT output;
     class EVALR,REPORT eval;
     class TESTS,REVIEW human;
