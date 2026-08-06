@@ -2,9 +2,9 @@
 
 ## Summary
 
-This project turns a small classroom prototype into an interactive, **trustworthy-by-design** music recommender. It doesn't just return songs — it explains *why* each song was picked, and it ships with a reliability harness that measures **how consistently and how well** it performs across many kinds of users.
+This project turns a small classroom prototype into an interactive, **trustworthy-by-design** music recommender. It doesn't just return songs, it explains *why* each song was picked, and it ships with a reliability harness that measures **how consistently and how well** it performs across many kinds of users.
 
-**Why it matters:** getting a recommender to *work* is one thing; making it *accurately beneficial to real users* is the actual goal. By building the evolution and the measurement together, I can see exactly what's missing and what needs to improve — instead of guessing. The headline of this version is reliability and consistency: same input → same list, small input change → small output change, and every recommendation carries a plain-English reason.
+**Why it matters:** getting a recommender to *work* is one thing; making it *accurately beneficial to real users* is the actual goal. By building the evolution and the measurement together, I can see exactly what's missing and what needs to improve instead of guessing. The headline of this version is reliability and consistency: same input → same list, small input change → small output change, and every recommendation carries a plain-English reason.
 
 ### Where it started — *Music Recommender Simulation*
 
@@ -16,7 +16,7 @@ This applied-AI version keeps that scoring core intact and extends it into a ful
 
 ## How The System Works
 
-The recommender is **content-based**: it recommends songs that *sound and feel like* what the user asks for, in two clear steps — **score every song**, then **rank and trim** the list.
+The recommender is **content-based**: it recommends songs that *sound and feel like* what the user asks for, in two clear steps: **score every song**, then **rank and trim** the list.
 
 **Each `Song`** carries ten fields, but four drive the recommendation: `genre`, `mood`, `energy` (0–1), and `acousticness` (0–1). The rest (`id`, `title`, `artist`, `tempo_bpm`, `valence`, `danceability`) are labels for display or features kept for future experiments.
 
@@ -47,7 +47,7 @@ The full system is captured in [`diagrams/system_diagram.mmd`](diagrams/system_d
 - **Evaluation loop** — the `ReliabilityEvaluator` (`src/reliability.py`) *observes* the recommender without changing it, producing a `ReliabilityReport`.
 - **Human & testing loop** — automated tests plus my own review of the report and biases feed back into the scoring weights and data.
 
-The key architectural idea: **both front-ends share one scoring core**, and the reliability harness measures that core rather than either UI — so the evaluation stays honest no matter how a user interacts with the system.
+The key architectural idea: **both front-ends share one scoring core**, and the reliability harness measures that core rather than either UI. The evaluation stays honest no matter how a user interacts with the system.
 
 ---
 
@@ -118,7 +118,7 @@ The key architectural idea: **both front-ends share one scoring core**, and the 
    Because: matches your favorite genre (pop)
 ```
 
-Note how the **acoustic + low-energy + chill** signals pull acoustic lofi/ambient tracks to the top, while the `pop` genre preference still surfaces two pop songs lower down — the explanation makes the trade-off visible.
+Note how the **acoustic + low-energy + chill** signals pull acoustic lofi/ambient tracks to the top, while the `pop` genre preference still surfaces two pop songs lower down. The explanation makes the trade-off visible.
 
 <!-- Optional: add a screenshot of the running Streamlit app here -->
 
@@ -141,7 +141,7 @@ Note how the **acoustic + low-energy + chill** signals pull acoustic lofi/ambien
    Because: a similar mood (hopeful), energy level is a decent fit
 ```
 
-Fuzzy matching earns `indie pop` and `synthwave` partial genre credit — related discovery instead of an exact-match filter bubble.
+Fuzzy matching earns `indie pop` and `synthwave` partial genre credit: related discovery instead of an exact-match filter bubble.
 
 ### C) Command line — adversarial input (negative energy)
 
@@ -162,7 +162,7 @@ Fuzzy matching earns `indie pop` and `synthwave` partial genre credit — relate
    Because: nice and acoustic, like you prefer
 ```
 
-An out-of-range `energy = -1.0` inverts the energy term, so low-energy acoustic tracks bubble up. The list still looks plausible — a deliberate demonstration of the "garbage in, garbage out" limitation documented below.
+An out-of-range `energy = -1.0` inverts the energy term, so low-energy acoustic tracks bubble up. The list still looks plausible. A deliberate demonstration of the "garbage in, garbage out" limitation documented below.
 
 ---
 
@@ -205,7 +205,7 @@ Sample run over five diverse profiles:
 
 ## Testing Summary
 
-**What worked, what didn't, and what I learned:** some metrics improved and some stayed flat — and the flat ones were mostly capped by the **limited data size**, not by the ranking logic.
+**What worked, what didn't, and what I learned:** some metrics improved and some stayed flat, and the flat ones were mostly capped by the **limited data size**, not by the ranking logic.
 
 | Metric | Before | After | Why |
 |---|---:|---:|---|
@@ -214,7 +214,7 @@ Sample run over five diverse profiles:
 | **Relevance** | 0.44 | 0.44 | **Data ceiling** — 1 jazz / 1 metal song caps precision@5 at 0.20. |
 | **Confidence** | 0.40 | 0.40 | **Inherent** — several equally-good matches, not fragility. |
 
-The lesson: not every weakness is a code bug. Stability responded to a code change (fuzzy matching), but relevance and confidence are structural — they reflect a tiny, imbalanced catalog with multiple equally-valid answers. Measuring first told me *which* problems code could fix and which ones only more/better data could. Tests for every metric live in `tests/test_reliability.py`.
+The lesson: not every weakness is a code bug. Stability responded to a code change (fuzzy matching), but relevance and confidence are structural. They reflect a tiny, imbalanced catalog with multiple equally-valid answers. Measuring first told me *which* problems code could fix and which ones only more/better data could. Tests for every metric live in `tests/test_reliability.py`.
 
 ### How the recommendations are verified
 
@@ -242,15 +242,15 @@ Example CLI output with confidence:
 
 ## Limitations and Risks
 
-Beyond the obvious limits (tiny 20-song catalog, no understanding of lyrics), I stress-tested the scorer with adversarial and edge-case profiles and found several **structural biases** — measured against the real catalog, so they aren't hypothetical.
+Beyond the obvious limits (tiny 20-song catalog, no understanding of lyrics), I stress-tested the scorer with adversarial and edge-case profiles and found several **structural biases**, measured against the real catalog, so they aren't hypothetical.
 
 1. **The "energy gap" underserves moderate-energy users.** Energy is bimodal (a real empty gap between 0.64 and 0.75), so a user wanting energy ≈ 0.6 gets dragged toward whichever extreme cluster is nearer.
-2. **Energy and acousticness are secretly the same axis.** `corr(energy, acousticness) = −0.97` — the two "independent" terms are really one signal counted twice (double jeopardy for calm-music fans).
+2. **Energy and acousticness are secretly the same axis.** `corr(energy, acousticness) = −0.97`. The two "independent" terms are really one signal counted twice (double jeopardy for calm-music fans).
 3. **There is no "neutral" on acoustic.** `likes_acoustic` always contributes up to ±1.0 and defaults to `False`, silently biasing undecided users toward electronic/produced tracks.
 4. **Fuzzy matching softens but doesn't eliminate the filter bubble.** Related labels now earn partial credit, but the system still leans heavily on the labels the user typed.
 5. **Catalog imbalance penalizes niche-genre fans.** With `lofi=3, pop=2` and everything else appearing once, niche fans get one true match and a top-5 padded with energy-only strangers.
-6. **Three measured features are ignored.** `tempo_bpm`, `valence`, and `danceability` are loaded but never scored — `valence` especially, which directly measures positivity.
-7. **Rankings never change.** Ties keep CSV order and there's no randomization, so a profile returns the identical list every run — no freshness.
+6. **Three measured features are ignored.** `tempo_bpm`, `valence`, and `danceability` are loaded but never scored. `valence` especially, which directly measures positivity.
+7. **Rankings never change.** Ties keep CSV order and there's no randomization, so a profile returns the identical list every run.
 8. **Invalid input isn't validated.** Out-of-range or negative `energy` silently hijacks or inverts the ranking (see Sample Interaction C); case mismatches (`"Pop"` vs `"pop"`) drop the exact-genre bonus with no warning.
 
 I go deeper on the fairness implications in the [model card](model_card.md).
@@ -259,8 +259,8 @@ I go deeper on the fairness implications in the [model card](model_card.md).
 
 ## Reflection
 
-Building this taught me that a recommender is only as good as its fit to *real* people, and that's the hard part: **it's hard to make one that's one-size-fits-all.** I can optimize the scoring, tune the weights, and add fuzzy matching to squeeze out more relevance and stability — but only up to a point. The scoring rule encodes *my* assumptions about what "similar" and "good" mean, and the data caps what any rule can achieve.
+Building this taught me that a recommender is only as good as its fit to *real* people, and that's the hard part: **it's hard to make one that's one-size-fits-all.** I can optimize the scoring, tune the weights, and add fuzzy matching to squeeze out more relevance and stability, but only up to a point. The scoring rule encodes *my* assumptions about what "similar" and "good" mean, and the data caps what any rule can achieve.
 
-What I take away is that the last mile can't be reached by code alone. Turning data into predictions is straightforward; turning predictions into something genuinely helpful and fair needs **real user experience and feedback** to guide the next round of weight and scoring adjustments. That's also where bias hides — in the default assumptions (like `likes_acoustic=False`), the imbalanced catalog, and the labels I decided were "related." Measuring reliability didn't remove those biases, but it made them visible and honest, which is the necessary first step toward improving them.
+What I take away is that the last mile can't be reached by code alone. Turning data into predictions is straightforward; turning predictions into something genuinely helpful and fair needs **real user experience and feedback** to guide the next round of weight and scoring adjustments. That's also where bias hides in the default assumptions (like `likes_acoustic=False`), the imbalanced catalog, and the labels I decided were "related." Measuring reliability didn't remove those biases, but it made them visible and honest, which is the necessary first step toward improving them.
 
 See the [**Model Card**](model_card.md) for the full fairness analysis.
